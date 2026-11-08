@@ -1,37 +1,90 @@
 name: Build Habit Tracker APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+
+      # 1. Mengambil file dari repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 2. Menyiapkan Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 3. Menyiapkan Android SDK
       - name: Setup Android SDK
-        run: |
-          yes | sdkmanager --licenses || true
-          "platforms;android-35" "build-tools;35.0.0"
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
-      - name: Extract project
+      # 4. Mengekstrak file proyek ZIP
+      - name: Extract Android Project
         run: |
-          unzip -q HabitTrackerAndroid-Project-fixed.zip
-          cd HabitTrackerAndroid
-          gradle assembleDebug
+          mkdir -p android-project
 
+          unzip -q HabitTrackerAndroid-Project-fixed.zip \
+            -d android-project
+
+      # 5. Mencari folder utama proyek Android
+      - name: Locate Android Project
+        id: project
+        run: |
+          PROJECT_FILE=$(find android-project \
+            -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "File settings.gradle tidak ditemukan!"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+
+          echo "dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+
+          echo "Project ditemukan di: $PROJECT_DIR"
+
+      # 6. Menyiapkan Gradle
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+
+      # 7. Membuat APK
+      - name: Build Debug APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          else
+            gradle --no-daemon assembleDebug
+          fi
+
+      # 8. Mengunggah hasil APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HabitTracker30Hari-APK
-          path: HabitTrackerAndroid/app/build/outputs/apk/debug/app-debug.apk
+          name: HabitTracker-APK
+          path: |
+            ${{ steps.project.outputs.dir }}/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
